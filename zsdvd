@@ -1,0 +1,209 @@
+import React, { useState, useRef } from "react";
+
+export default function ScorebugStudio() {
+  const [sport, setSport] = useState("basketball");
+  const [teamA, setTeamA] = useState("Home");
+  const [teamB, setTeamB] = useState("Visitor");
+  const [scoreA, setScoreA] = useState(0);
+  const [scoreB, setScoreB] = useState(0);
+  const [period, setPeriod] = useState(1);
+  const [clock, setClock] = useState("12:00");
+  const [preset, setPreset] = useState("modern");
+  const [bgOpacity, setBgOpacity] = useState(0.75);
+  const [primaryColor, setPrimaryColor] = useState("#0ea5a4");
+  const [secondaryColor, setSecondaryColor] = useState("#ef4444");
+  const [logoA, setLogoA] = useState("");
+  const [logoB, setLogoB] = useState("");
+  const [animations, setAnimations] = useState({});
+  const fileNameRef = useRef(null);
+
+  const sportLabels = {
+    basketball: { periodLabel: "Q", clockDefault: "12:00" },
+    football: { periodLabel: "Q", clockDefault: "15:00" },
+    volleyball: { periodLabel: "Set", clockDefault: "00:00" },
+  };
+
+  function resetForSport(s) {
+    setSport(s);
+    setPeriod(1);
+    setClock(sportLabels[s].clockDefault);
+  }
+
+  function generateOverlayHTML(options, animations) {
+    const {
+      sport, teamA, teamB, scoreA, scoreB, period, clock,
+      preset, bgOpacity, primaryColor, secondaryColor, logoA, logoB
+    } = options;
+
+    // Generate custom animations
+    let customAnimations = Object.entries(animations).map(([name, frames]) => {
+      const body = frames.map(f => `${f.percent}% { ${f.prop}: ${f.value}; }`).join("\n");
+      return `@keyframes ${name} {\n${body}\n}`;
+    }).join("\n");
+
+    const css = `
+      :root{ --primary: ${primaryColor}; --secondary: ${secondaryColor}; --bg-opacity: ${bgOpacity}; }
+      html,body{ margin:0; padding:0; background:transparent; }
+      .scorebug-wrap{ font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; display:flex; align-items:center; gap:12px; padding:8px 12px; width:100%; box-sizing:border-box; }
+      .sb-left, .sb-right{ display:flex; align-items:center; gap:8px; }
+      .sb-card{ background: rgba(0,0,0,var(--bg-opacity)); backdrop-filter: blur(4px); border-radius:10px; padding:8px 12px; display:flex; align-items:center; gap:12px; }
+      .team { display:flex; align-items:center; gap:8px; min-width:140px; }
+      .team .name{ font-weight:700; font-size:18px; color: #fff; }
+      .score { font-weight:900; font-size:36px; color:var(--primary); }
+      .score.secondary { color:var(--secondary); }
+      .meta{ color: #eee; font-size:12px; }
+      .anim-slide { animation: slideIn 600ms cubic-bezier(.22,.9,.27,1); }
+      .anim-pulse { animation: pulse 1200ms ease-in-out infinite; }
+      @keyframes slideIn { from { transform: translateY(20px); opacity:0 } to { transform: translateY(0); opacity:1 } }
+      @keyframes pulse { 0%{ transform: scale(1) } 50%{ transform: scale(1.02)} 100%{ transform: scale(1) } }
+      ${customAnimations}
+      @media (max-width:700px){ .score { font-size:26px } .team .name{ font-size:14px } }
+    `;
+
+    const js = `
+      (function(){
+        function $(sel){ return document.querySelector(sel); }
+        function update(state){
+          $("#teamA").textContent = state.teamA || "Home";
+          $("#teamB").textContent = state.teamB || "Visitor";
+          $("#scoreA").textContent = state.scoreA ?? 0;
+          $("#scoreB").textContent = state.scoreB ?? 0;
+          $("#period").textContent = state.period ?? 1;
+          $("#clock").textContent = state.clock ?? "00:00";
+        }
+        update(${JSON.stringify({teamA, teamB, scoreA, scoreB, period, clock})});
+
+        try{
+          const ws = new WebSocket("ws://localhost:8081");
+          ws.onopen = ()=> console.log('Scorebug overlay websocket connected');
+          ws.onmessage = (evt)=>{ 
+            try{ 
+              const msg = JSON.parse(evt.data); 
+              if(msg.type==='update') update(msg.payload||{}); 
+              if(msg.type==='ping') ws.send(JSON.stringify({type:'pong'}));
+            }catch(e){console.warn(e);} 
+          }
+          ws.onclose = ()=> console.log('Scorebug websocket closed');
+        }catch(e){ console.warn('WebSocket failed', e); }
+
+        window.scorebug = { update };
+      })();
+    `;
+
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorebug Overlay</title>
+<style>${css}</style>
+</head>
+<body>
+<div class="scorebug-wrap anim-${preset==='modern'?'slide':'pulse'}">
+  <div class="sb-card sb-left">
+    <div class="team">
+      ${logoA?`<img src="${logoA}" style="width:40px;height:40px;border-radius:6px;object-fit:contain"/>`:''}
+      <div>
+        <div id="teamA" class="name">${teamA}</div>
+        <div class="meta">${sport==='volleyball'?'Sets':'Record'}</div>
+      </div>
+    </div>
+  </div>
+  <div style="flex:1;display:flex;justify-content:center;align-items:center;">
+    <div style="display:flex;gap:10px;align-items:center;">
+      <div class="score" id="scoreA">${scoreA}</div>
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="meta">${sport==='volleyball'?'Set':'Period'}</div>
+        <div id="period" class="meta">${period}</div>
+        <div id="clock" class="meta">${clock}</div>
+      </div>
+      <div class="score secondary" id="scoreB">${scoreB}</div>
+    </div>
+  </div>
+  <div class="sb-card sb-right">
+    <div class="team">
+      <div style="text-align:right;">
+        <div id="teamB" class="name">${teamB}</div>
+        <div class="meta">${sport==='volleyball'?'Sets':'Record'}</div>
+      </div>
+      ${logoB?`<img src="${logoB}" style="width:40px;height:40px;border-radius:6px;object-fit:contain"/>`:''}
+    </div>
+  </div>
+</div>
+<script>${js}</script>
+</body>
+</html>`;
+  }
+
+  function onExport() {
+    const html = generateOverlayHTML({ sport, teamA, teamB, scoreA, scoreB, period, clock, preset, bgOpacity, primaryColor, secondaryColor, logoA, logoB }, animations);
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${teamA.replace(/\s+/g,'_')}_vs_${teamB.replace(/\s+/g,'_')}_scorebug.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Simple keyframe editor component
+  const KeyframeEditor = ({ animations, setAnimations }) => {
+    const [selected, setSelected] = useState(null);
+    const [newName, setNewName] = useState("");
+    const [prop, setProp] = useState("transform");
+    const [value, setValue] = useState("translateY(0)");
+    const [percent, setPercent] = useState(0);
+
+    function addAnimation() { if(!newName.trim()) return; setAnimations({...animations,[newName]:[]}); setNewName(""); }
+    function addKeyframe() { if(!selected) return; const updated=[...animations[selected],{percent,prop,value}]; updated.sort((a,b)=>a.percent-b.percent); setAnimations({...animations,[selected]:updated}); }
+    function deleteFrame(idx) { const updated=animations[selected].filter((_,i)=>i!==idx); setAnimations({...animations,[selected]:updated}); }
+
+    return (
+      <div className="bg-white/5 p-3 rounded mt-4">
+        <h2 className="font-semibold mb-2">Keyframe Animation Builder</h2>
+        <div className="flex gap-2 mb-3">
+          <input placeholder="New Animation Name" value={newName} onChange={(e)=>setNewName(e.target.value)} className="p-2 bg-white/10 rounded flex-1"/>
+          <button onClick={addAnimation} className="px-3 bg-green-600 text-white rounded">Add</button>
+        </div>
+        <div className="flex gap-2 mb-3">
+          <select className="p-2 rounded bg-white/10 flex-1" value={selected||""} onChange={(e)=>setSelected(e.target.value)}>
+            <option value="">Select Animation</option>
+            {Object.keys(animations).map(k=> <option key={k}>{k}</option>)}
+          </select>
+        </div>
+        {selected && (
+          <div>
+            <div className="flex gap-2 mt-2">
+              <input type="number" min={0} max={100} value={percent} onChange={(e)=>setPercent(Number(e.target.value))} className="p-2 rounded bg-white/10 w-24"/>
+              <input placeholder="CSS property" value={prop} onChange={(e)=>setProp(e.target.value)} className="p-2 rounded bg-white/10 flex-1"/>
+              <input placeholder="Value" value={value} onChange={(e)=>setValue(e.target.value)} className="p-2 rounded bg-white/10 flex-1"/>
+              <button onClick={addKeyframe} className="px-3 bg-blue-600 text-white rounded">Add</button>
+            </div>
+            <div className="mt-3">
+              {animations[selected].map((f,i)=>(
+                <div key={i} className="flex justify-between bg-white/10 p-2 rounded mt-1">
+                  <div>{f.percent}% — {f.prop}: {f.value}</div>
+                  <button onClick={()=>deleteFrame(i)} className="text-red-400">✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Scorebug Studio</h1>
+
+      {/* Controls omitted for brevity - you can add sport, score, logos, colors, etc. */}
+
+      <div className="mt-4 flex gap-2">
+        <button onClick={onExport} className="px-4 py-2 rounded bg-sky-600 text-white">Export Overlay</button>
+      </div>
+
+      <KeyframeEditor animations={animations} setAnimations={setAnimations}/>
+    </div>
+  )
+}
